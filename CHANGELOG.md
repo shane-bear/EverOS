@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`GET /health` now separates configured LLM capability from operational
+  readiness.** The additive `llm_readiness` block reports the last real call's
+  success/failure state, timestamps, consecutive failure count, and safe
+  exception type while liveness remains HTTP 200. Before the first call its
+  verdict is `null`, rather than claiming that startup configuration proves
+  provider reachability. Reading health performs no synthetic or billable LLM
+  request.
+
 ## [1.2.3] - 2026-08-07
 
 **Background maintenance that fails loudly instead of quietly.** A soak run on
