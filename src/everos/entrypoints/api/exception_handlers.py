@@ -18,6 +18,7 @@ Register all handlers at once with ``register_handlers(app)``.
 
 from __future__ import annotations
 
+from everalgo.llm import LLMError
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -41,6 +42,7 @@ from everos.core.errors import (
     ExtractionEmptyError,
     InfrastructureError,
     InvalidInputError,
+    LLMServiceError,
     NotFoundError,
     PathTraversalError,
     ProviderNotConfiguredError,
@@ -53,6 +55,7 @@ from .utils import extract_request_id
 logger = get_logger(__name__)
 
 _INTERNAL_ERROR_MESSAGE = "Internal server error"
+_UPSTREAM_LLM_ERROR_MESSAGE = "Upstream LLM request failed; retry may succeed."
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +205,32 @@ async def infrastructure_handler(
         HTTP_503_SERVICE_UNAVAILABLE,
         ErrorCode.EXTERNAL_SERVICE_UNAVAILABLE,
         str(exc),
+    )
+
+
+async def llm_service_handler(
+    request: Request,
+    exc: LLMError | LLMServiceError,
+) -> JSONResponse:
+    """Primary-LLM failures -> retryable 503 with a dedicated safe code.
+
+    EverAlgo deliberately preserves provider details in ``LLMError`` and its
+    ``__cause__`` for server-side diagnosis.  Neither is safe response content:
+    compatible providers can include endpoint or payload fragments in their
+    messages.  The request id joins this stable client response to the detailed
+    structured server log.
+    """
+    logger.warning(
+        "upstream_llm_unavailable",
+        path=str(request.url.path),
+        exception_type=type(exc).__name__,
+        cause_type=type(exc.__cause__).__name__ if exc.__cause__ else None,
+    )
+    return _error_response(
+        request,
+        HTTP_503_SERVICE_UNAVAILABLE,
+        ErrorCode.UPSTREAM_LLM_UNAVAILABLE,
+        _UPSTREAM_LLM_ERROR_MESSAGE,
     )
 
 
@@ -373,6 +402,12 @@ def register_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ExtractionEmptyError, extraction_empty_handler)
     app.add_exception_handler(InvalidInputError, invalid_input_handler)
     # Infrastructure errors (transient, retryable)
+    # Register both the EverOS domain wrapper and EverAlgo's provider error.
+    # Starlette's MRO dispatch would otherwise send LLMServiceError through the
+    # generic infrastructure code and an exhausted EverAlgo error to the 500
+    # catch-all.
+    app.add_exception_handler(LLMServiceError, llm_service_handler)
+    app.add_exception_handler(LLMError, llm_service_handler)
     app.add_exception_handler(InfrastructureError, infrastructure_handler)
     # Capability errors (permanent, not retryable)
     app.add_exception_handler(CapabilityError, capability_handler)

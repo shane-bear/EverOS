@@ -9,6 +9,7 @@ White-box surfaces: none — assertions are purely on HTTP response shape.
 from __future__ import annotations
 
 import pytest
+from everalgo.llm import LLMError
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
@@ -75,6 +76,10 @@ def _make_app() -> FastAPI:
     @app.get("/raise/llm")
     async def _llm() -> None:
         raise LLMServiceError("LLM rate limit exceeded")
+
+    @app.get("/raise/everalgo-llm")
+    async def _everalgo_llm() -> None:
+        raise LLMError("provider detail must not leave the server")
 
     @app.get("/raise/runtime")
     async def _runtime() -> None:
@@ -213,12 +218,31 @@ async def test_embedding_service_error_routes_to_503(client: AsyncClient) -> Non
 
 
 async def test_llm_service_error_routes_to_503(client: AsyncClient) -> None:
-    """LLMServiceError (InfrastructureError subclass) → 503 via MRO."""
+    """LLMServiceError gets the dedicated retryable upstream code."""
     resp = await client.get("/raise/llm")
     assert resp.status_code == 503
     data = resp.json()
-    assert data["error"]["code"] == "EXTERNAL_SERVICE_UNAVAILABLE"
+    assert data["error"]["code"] == "UPSTREAM_LLM_UNAVAILABLE"
+    assert data["error"]["message"] == (
+        "Upstream LLM request failed; retry may succeed."
+    )
+    assert "rate limit" not in data["error"]["message"]
     _assert_envelope(data, path="/raise/llm")
+
+
+async def test_exhausted_everalgo_llm_error_routes_to_safe_503(
+    client: AsyncClient,
+) -> None:
+    """The error retried by PR #1 eventually maps without leaking detail."""
+    resp = await client.get("/raise/everalgo-llm")
+    assert resp.status_code == 503
+    data = resp.json()
+    assert data["error"]["code"] == "UPSTREAM_LLM_UNAVAILABLE"
+    assert data["error"]["message"] == (
+        "Upstream LLM request failed; retry may succeed."
+    )
+    assert "provider detail" not in str(data)
+    _assert_envelope(data, path="/raise/everalgo-llm")
 
 
 # ---------------------------------------------------------------------------
