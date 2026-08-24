@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Agent-mode memorize works with the current boundary result contract.**
+  `everalgo-agent-memory` is updated to 0.5.0 alongside
+  `everalgo-boundary` 0.3.0, preventing every agent-mode `/memory/add` from
+  failing when the boundary result includes `should_wait`.
+
 - **Exhausted primary-LLM failures now return a retryable, classifiable API
   response.** EverAlgo `LLMError` and EverOS `LLMServiceError` reach HTTP 503
   with the dedicated `UPSTREAM_LLM_UNAVAILABLE` code instead of falling into a
