@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   provider reachability. Reading health performs no synthetic or billable LLM
   request.
 
+### Fixed
+
+- **Exhausted primary-LLM failures now return a retryable, classifiable API
+  response.** EverAlgo `LLMError` and EverOS `LLMServiceError` reach HTTP 503
+  with the dedicated `UPSTREAM_LLM_UNAVAILABLE` code instead of falling into a
+  generic 500 or generic infrastructure code. The response keeps a stable safe
+  message and request id; provider exception text and causes remain server-side.
+
 ## [1.2.3] - 2026-08-07
 
 **Background maintenance that fails loudly instead of quietly.** A soak run on
