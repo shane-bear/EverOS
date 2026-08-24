@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from everos import __version__
 from everos.component.capabilities import compute_disabled_features
 from everos.component.embedding import get_embedding_capability
+from everos.component.llm import get_llm_readiness
 from everos.component.multimodal import get_multimodal_llm_capability
 from everos.component.parser import parser_available
 from everos.component.rerank import get_rerank_capability
@@ -55,6 +58,21 @@ class CascadeHealthBlock(BaseModel):
     prune_stale_seconds: float
 
 
+class LLMReadinessBlock(BaseModel):
+    """Outcomes observed from real calls to the primary LLM provider.
+
+    ``healthy=None`` means no call has completed since this process started.
+    The block never performs a synthetic provider call, so reading health is
+    fast and cannot spend tokens.
+    """
+
+    healthy: bool | None
+    last_success_at: datetime | None
+    last_failure_at: datetime | None
+    consecutive_failures: int
+    last_error_type: str | None
+
+
 class HealthResponse(BaseModel):
     """Response schema for ``GET /health``.
 
@@ -70,6 +88,7 @@ class HealthResponse(BaseModel):
     version: str
     capabilities: HealthCapabilities
     disabled_features: list[str]
+    llm_readiness: LLMReadinessBlock
     cascade: CascadeHealthBlock | None = None
     """Present when the cascade lifespan is running; ``None`` for a
     minimal app built without it."""
@@ -82,23 +101,20 @@ async def health(request: Request) -> HealthResponse:
     ``status`` stays ``"ok"`` whenever the process is up — the HTTP code
     is a *liveness* signal and a degraded cascade must not trigger a
     restart (a crash-loop fixes neither a bad md file nor disk bloat).
-    The ``cascade`` block is the *readiness* signal: ``healthy=false``
+    The ``llm_readiness`` block reports outcomes from real provider calls;
+    ``healthy=None`` means no call has completed in this process.  It performs
+    no synthetic probe.  The ``cascade`` block is its subsystem readiness
+    signal: ``healthy=false``
     with human-readable ``reasons`` **only** when the projection pipeline
     itself is stuck (drain failing, optimize stuck, version cleanup
     stalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is
     a data-quality backlog reported as an informational count that does
     not flip ``healthy``. Alert on ``cascade.healthy``.
     """
-    # ``llm`` is hardcoded ``True`` — kept for symmetry with the caps
-    # dict rather than probed live. Rationale: LLM is a Tier-1 hard
-    # requirement enforced at startup by ``LLMLifespanProvider``
-    # (lifespans/llm.py), which eagerly calls ``get_llm_client()`` and
-    # raises ``LLMNotConfiguredError`` if credentials are missing —
-    # FastAPI startup then fails, so ``/health`` is unreachable
-    # without a working LLM. Any code path that reaches this handler
-    # therefore has ``get_llm_client()`` returning a real client. If
-    # the LLM capability is ever downgraded to soft (like embed /
-    # rerank), swap this literal for a real probe.
+    # ``capabilities.llm`` means configuration passed the mandatory startup
+    # gate; it is not a reachability claim.  Real call outcomes live in the
+    # separate ``llm_readiness`` block so liveness stays independent from an
+    # external provider.
     caps = HealthCapabilities(
         llm=True,
         embed=get_embedding_capability().available,
@@ -106,6 +122,7 @@ async def health(request: Request) -> HealthResponse:
         multimodal_llm=get_multimodal_llm_capability().available,
         parser=parser_available(),
     )
+    llm = get_llm_readiness()
     cascade: CascadeHealthBlock | None = None
     orch = cascade_orchestrator(request)
     if orch is not None:
@@ -146,5 +163,12 @@ async def health(request: Request) -> HealthResponse:
         version=__version__,
         capabilities=caps,
         disabled_features=compute_disabled_features(caps.model_dump()),
+        llm_readiness=LLMReadinessBlock(
+            healthy=llm.healthy,
+            last_success_at=llm.last_success_at,
+            last_failure_at=llm.last_failure_at,
+            consecutive_failures=llm.consecutive_failures,
+            last_error_type=llm.last_error_type,
+        ),
         cascade=cascade,
     )

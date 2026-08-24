@@ -22,6 +22,7 @@ from everos.config import load_settings
 from everos.core.observability.logging import get_logger
 
 from ._usage_client import UsageRecordingClient
+from .readiness import record_llm_failure, record_llm_success
 
 logger = get_logger(__name__)
 
@@ -49,14 +50,19 @@ class _LoggingLLMClient:
         response_format: type[BaseModel] | None = None,
         **extra: Any,
     ) -> ChatResponse:
-        resp = await self._inner.chat(
-            messages,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format=response_format,
-            **extra,
-        )
+        try:
+            resp = await self._inner.chat(
+                messages,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                **extra,
+            )
+        except Exception as error:
+            record_llm_failure(error)
+            raise
+        record_llm_success()
         if resp.finish_reason and resp.finish_reason != "stop":
             logger.warning(
                 "llm_non_stop_finish",

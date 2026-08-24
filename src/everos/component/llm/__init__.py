@@ -13,6 +13,7 @@ Public surface:
   ``openai.AsyncOpenAI`` against any OpenAI-compatible endpoint.
 - :func:`build_llm_provider` — settings-driven factory.
 - :func:`get_llm_client` — process-wide lazy singleton accessor.
+- :func:`get_llm_readiness` — outcomes observed from real primary-LLM calls.
 
 External usage::
 
@@ -30,6 +31,8 @@ from .protocol import ChatResponse as ChatResponse
 from .protocol import LLMClient as LLMClient
 from .protocol import LLMError as LLMError
 from .protocol import Usage as Usage
+from .readiness import LLMReadiness as LLMReadiness
+from .readiness import get_llm_readiness as get_llm_readiness
 
 __all__ = [
     "ChatMessage",
@@ -37,9 +40,11 @@ __all__ = [
     "LLMClient",
     "LLMError",
     "LLMNotConfiguredError",
+    "LLMReadiness",
     "OpenAIProvider",
     "Usage",
     "build_llm_provider",
     "get_llm_client",
+    "get_llm_readiness",
     "get_multimodal_llm_client",
 ]
