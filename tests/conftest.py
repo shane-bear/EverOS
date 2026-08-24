@@ -66,6 +66,16 @@ def _reset_settings_cache() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _reset_llm_readiness() -> Iterator[None]:
+    """Keep process-local LLM call outcomes from leaking between tests."""
+    from everos.component.llm import readiness
+
+    readiness._reset_for_tests()
+    yield
+    readiness._reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _reset_embedding_capability_singleton() -> Iterator[None]:
     """Force embedding capability to ``available=False`` for every test.
 

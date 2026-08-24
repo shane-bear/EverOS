@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import importlib
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import SecretStr
 
 from everos.component.llm import LLMNotConfiguredError
+from everos.component.llm import readiness as readiness_mod
 from everos.component.llm._usage_client import UsageRecordingClient
 from everos.config import Settings
 from everos.config.settings import LLMSettings, ObservabilitySettings
@@ -127,6 +129,11 @@ class _StubInnerClient:
         return self._resp
 
 
+class _FailingInnerClient:
+    async def chat(self, messages, **_kwargs) -> _StubResponse:
+        raise TimeoutError("provider response must not enter readiness")
+
+
 async def test_logging_wrapper_warns_on_non_stop_finish_reason(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -153,3 +160,38 @@ async def test_logging_wrapper_silent_on_stop_finish_reason() -> None:
     )
     resp = await wrapper.chat([])
     assert resp.finish_reason == "stop"
+
+
+async def test_logging_wrapper_records_real_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_at = datetime(2026, 8, 22, 10, 0, tzinfo=UTC)
+    monkeypatch.setattr(readiness_mod, "get_utc_now", lambda: observed_at)
+    wrapper = _client_mod._LoggingLLMClient(
+        _StubInnerClient(_StubResponse(finish_reason="stop"))
+    )
+
+    await wrapper.chat([])
+
+    state = readiness_mod.get_llm_readiness()
+    assert state.healthy is True
+    assert state.last_success_at == observed_at
+    assert state.consecutive_failures == 0
+    assert state.last_error_type is None
+
+
+async def test_logging_wrapper_records_failure_and_reraises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed_at = datetime(2026, 8, 22, 10, 1, tzinfo=UTC)
+    monkeypatch.setattr(readiness_mod, "get_utc_now", lambda: observed_at)
+    wrapper = _client_mod._LoggingLLMClient(_FailingInnerClient())
+
+    with pytest.raises(TimeoutError, match="provider response"):
+        await wrapper.chat([])
+
+    state = readiness_mod.get_llm_readiness()
+    assert state.healthy is False
+    assert state.last_failure_at == observed_at
+    assert state.consecutive_failures == 1
+    assert state.last_error_type == "TimeoutError"

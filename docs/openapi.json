@@ -12,7 +12,7 @@
           "health"
         ],
         "summary": "Health",
-        "description": "Liveness + capabilities + cascade readiness probe.\n\n``status`` stays ``\"ok\"`` whenever the process is up — the HTTP code\nis a *liveness* signal and a degraded cascade must not trigger a\nrestart (a crash-loop fixes neither a bad md file nor disk bloat).\nThe ``cascade`` block is the *readiness* signal: ``healthy=false``\nwith human-readable ``reasons`` **only** when the projection pipeline\nitself is stuck (drain failing, optimize stuck, version cleanup\nstalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is\na data-quality backlog reported as an informational count that does\nnot flip ``healthy``. Alert on ``cascade.healthy``.",
+        "description": "Liveness + capabilities + cascade readiness probe.\n\n``status`` stays ``\"ok\"`` whenever the process is up — the HTTP code\nis a *liveness* signal and a degraded cascade must not trigger a\nrestart (a crash-loop fixes neither a bad md file nor disk bloat).\nThe ``llm_readiness`` block reports outcomes from real provider calls;\n``healthy=None`` means no call has completed in this process.  It performs\nno synthetic probe.  The ``cascade`` block is its subsystem readiness\nsignal: ``healthy=false``\nwith human-readable ``reasons`` **only** when the projection pipeline\nitself is stuck (drain failing, optimize stuck, version cleanup\nstalled). ``failed_permanent`` — files awaiting ``cascade fix`` — is\na data-quality backlog reported as an informational count that does\nnot flip ``healthy``. Alert on ``cascade.healthy``.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -2826,6 +2826,9 @@
             "type": "array",
             "title": "Disabled Features"
           },
+          "llm_readiness": {
+            "$ref": "#/components/schemas/LLMReadinessBlock"
+          },
           "cascade": {
             "anyOf": [
               {
@@ -2842,7 +2845,8 @@
           "status",
           "version",
           "capabilities",
-          "disabled_features"
+          "disabled_features",
+          "llm_readiness"
         ],
         "title": "HealthResponse",
         "description": "Response schema for ``GET /health``.\n\nDeclared as a Pydantic model (not ``dict``) so the generated\nOpenAPI schema carries the full field shape — ``capabilities``,\n``disabled_features`` and ``cascade`` are typed. A bare ``-> dict``\nreturn type degrades the OpenAPI response to\n``additionalProperties: true``, which robs clients (and codegen) of\nany structure to lean on."
@@ -2932,6 +2936,70 @@
         ],
         "title": "KnowledgeSearchResponse",
         "description": "Response for POST /search."
+      },
+      "LLMReadinessBlock": {
+        "properties": {
+          "healthy": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Healthy"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "consecutive_failures": {
+            "type": "integer",
+            "title": "Consecutive Failures"
+          },
+          "last_error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "healthy",
+          "last_success_at",
+          "last_failure_at",
+          "consecutive_failures",
+          "last_error_type"
+        ],
+        "title": "LLMReadinessBlock",
+        "description": "Outcomes observed from real calls to the primary LLM provider.\n\n``healthy=None`` means no call has completed since this process started.\nThe block never performs a synthetic provider call, so reading health is\nfast and cannot spend tokens."
       },
       "MemorizeAddRequest": {
         "properties": {
