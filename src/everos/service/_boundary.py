@@ -238,6 +238,18 @@ def _filter_for_mode(
 
 _BOUNDARY_MAX_ATTEMPTS = 3
 
+_BOUNDARY_REPAIR_SUFFIX = """
+
+The previous boundary-detection response was invalid. Do not repeat or quote the
+conversation. Return only the JSON object required by the output contract, with
+no markdown fence, explanation, prefix, or suffix.
+"""
+
+
+def _boundary_prompt_for_attempt(prompt: str, attempt: int) -> str:
+    """Escalate the output constraint after an invalid model response."""
+    return prompt if attempt == 0 else f"{prompt}{_BOUNDARY_REPAIR_SUFFIX}"
+
 
 async def _detect(
     merged: list[CanonicalMessage],
@@ -253,13 +265,14 @@ async def _detect(
     # the everalgo boundary detector; non-ValueError errors propagate.
     last_err: ValueError | None = None
     for attempt in range(_BOUNDARY_MAX_ATTEMPTS):
+        attempt_prompt = _boundary_prompt_for_attempt(prompt, attempt)
         try:
             if mode == "chat":
                 chat_msgs = [_to_chat_message(m) for m in merged]
                 result = await detect_boundaries(
                     chat_msgs,
                     llm=llm_client,
-                    prompt=prompt,
+                    prompt=attempt_prompt,
                     is_final=is_final,
                     hard_token_limit=hard_token_limit,
                     hard_msg_limit=hard_msg_limit,
@@ -270,7 +283,9 @@ async def _detect(
             # limits; the boundary primitive's defaults apply.
             items = [_to_conversation_item(m) for m in merged]
             detector = AgentBoundaryDetector(llm=llm_client)
-            result = await detector.adetect(items, is_final=is_final, prompt=prompt)
+            result = await detector.adetect(
+                items, is_final=is_final, prompt=attempt_prompt
+            )
             return list(result.cells), list(result.tail)
         except ValueError as err:
             last_err = err
