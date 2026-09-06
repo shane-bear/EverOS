@@ -33,8 +33,10 @@ def test_boundary_retry_prompt_demands_json_without_echoing_conversation() -> No
     assert _boundary_prompt_for_attempt(prompt, 0) == prompt
     repaired = _boundary_prompt_for_attempt(prompt, 1)
     assert repaired.startswith(prompt)
-    assert "Return only the JSON object" in repaired
-    assert "Do not repeat or quote the conversation" in repaired
+    # The suffix is a wrapped literal, so compare against normalized whitespace.
+    collapsed = " ".join(repaired.split())
+    assert "Return only the JSON object" in collapsed
+    assert "Do not repeat or quote the conversation" in collapsed
 
 
 @pytest.mark.asyncio
