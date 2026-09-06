@@ -8,12 +8,16 @@ exercised by integration tests under tests/integration/.
 from __future__ import annotations
 
 import datetime as _dt
+from types import SimpleNamespace
 
 import pytest
 from everalgo.types import ChatMessage, ToolCallRequest, ToolCallResult
 
+import everos.service._boundary as boundary_module
 from everos.memory import CanonicalMessage, ToolCall
 from everos.service._boundary import (
+    _boundary_prompt_for_attempt,
+    _detect,
     _filter_for_mode,
     _merge_dedupe_sort,
     _slice_tail,
@@ -21,6 +25,46 @@ from everos.service._boundary import (
     _to_conversation_item,
     _unique_all_senders,
 )
+
+
+def test_boundary_retry_prompt_demands_json_without_echoing_conversation() -> None:
+    prompt = "Return the boundary JSON."
+
+    assert _boundary_prompt_for_attempt(prompt, 0) == prompt
+    repaired = _boundary_prompt_for_attempt(prompt, 1)
+    assert repaired.startswith(prompt)
+    # The suffix is a wrapped literal, so compare against normalized whitespace.
+    collapsed = " ".join(repaired.split())
+    assert "Return only the JSON object" in collapsed
+    assert "Do not repeat or quote the conversation" in collapsed
+
+
+@pytest.mark.asyncio
+async def test_detect_repairs_prompt_after_invalid_boundary_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts: list[str] = []
+
+    async def fake_detect(*args: object, prompt: str, **kwargs: object) -> object:
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            raise ValueError("No JSON object found in batch boundary LLM response")
+        return SimpleNamespace(cells=[], tail=[])
+
+    monkeypatch.setattr(boundary_module, "detect_boundaries", fake_detect)
+    await _detect(
+        [_msg("m1", "user")],
+        mode="chat",
+        llm_client=object(),  # type: ignore[arg-type]
+        prompt="Return the boundary JSON.",
+        is_final=True,
+        hard_token_limit=100,
+        hard_msg_limit=10,
+    )
+
+    assert len(prompts) == 2
+    assert prompts[0] == "Return the boundary JSON."
+    assert "Return only the JSON object" in prompts[1]
 
 
 def _msg(
